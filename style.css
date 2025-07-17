@@ -14,11 +14,6 @@ body {
 header {
     background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
     color: white;
-    margin-bottom: 20px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    position: sticky;
-    top: 0;
-    z-index: 100;
 }
 
 .header-top {
@@ -102,7 +97,7 @@ header h1 i {
     gap: 15px;
 }
 
-.notification-btn, .user-btn, .settings-btn {
+.notification-btn, .user-btn, .settings-btn, .returns-btn, .review-btn {
     background: rgba(255,255,255,0.1);
     border: 1px solid rgba(255,255,255,0.2);
     color: white;
@@ -113,12 +108,12 @@ header h1 i {
     position: relative;
 }
 
-.notification-btn:hover, .user-btn:hover, .settings-btn:hover {
+.notification-btn:hover, .user-btn:hover, .settings-btn:hover, .returns-btn:hover, .review-btn:hover {
     background: rgba(255,255,255,0.2);
     transform: translateY(-2px);
 }
 
-.notification-badge {
+.notification-badge, .returns-badge, .review-badge {
     position: absolute;
     top: -5px;
     right: -5px;
@@ -129,6 +124,14 @@ header h1 i {
     border-radius: 10px;
     min-width: 18px;
     text-align: center;
+}
+
+.returns-badge {
+    background: #f39c12;
+}
+
+.review-badge {
+    background: #e74c3c;
 }
 
 .header-bottom {
@@ -311,6 +314,119 @@ header h1 i {
     color: #666;
 }
 
+/* Returns & Replacements Modal Styles */
+.returns-modal-content, .review-modal-content {
+    max-width: 600px;
+    margin: 5% auto;
+}
+
+.returns-modal-content h2, .review-modal-content h2 {
+    color: #2c3e50;
+    margin-bottom: 25px;
+    text-align: center;
+}
+
+.returns-modal-content h2 i, .review-modal-content h2 i {
+    margin-right: 10px;
+    color: #f39c12;
+}
+
+.close-returns-modal, .close-review-modal {
+    position: absolute;
+    right: 20px;
+    top: 20px;
+    font-size: 28px;
+    color: #aaa;
+    cursor: pointer;
+}
+
+.close-returns-modal:hover, .close-review-modal:hover {
+    color: #000;
+}
+
+/* Review Modal Specific Styles */
+.review-filters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    justify-content: center;
+}
+
+.filter-btn {
+    background-color: #f0f0f0;
+    border: none;
+    padding: 10px 20px;
+    cursor: pointer;
+    border-radius: 20px;
+    transition: all 0.3s;
+}
+
+.filter-btn.active {
+    background-color: #3498db;
+    color: white;
+}
+
+.filter-btn:hover:not(.active) {
+    background-color: #e0e0e0;
+}
+
+#review-items-list {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 10px;
+}
+
+.review-item {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 15px;
+    margin-bottom: 15px;
+    border-radius: 8px;
+    position: relative;
+}
+
+.review-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.review-item-type {
+    padding: 3px 10px;
+    border-radius: 15px;
+    font-size: 0.8em;
+    font-weight: bold;
+}
+
+.review-item-type.return {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.review-item-type.replacement {
+    background-color: #d1ecf1;
+    color: #0c5460;
+}
+
+.review-item-details {
+    font-size: 0.9em;
+    color: #666;
+    margin-bottom: 10px;
+}
+
+.review-item-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.review-item-actions button {
+    flex: 1;
+    padding: 8px 15px;
+    font-size: 0.9em;
+}
+
 /* Login Modal Styles */
 .login-modal-content {
     max-width: 400px;
@@ -380,7 +496,7 @@ main {
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     max-width: 1200px;
-    margin: 0 auto;
+    margin: 20px auto;
 }
 
 section {
@@ -423,6 +539,14 @@ h3 {
 
 .form-group.small {
     flex: 0 1 150px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    color: #555;
+    font-weight: 500;
+    font-size: 0.9em;
 }
 
 /* Input and Select Styles */
@@ -840,6 +964,7 @@ code {
     border-radius: 8px;
     max-height: 80vh;
     overflow-y: auto;
+    position: relative;
 }
 
 .close-modal {
@@ -1048,6 +1173,10 @@ code {
         flex-wrap: wrap;
         justify-content: center;
     }
+
+    .returns-modal-content, .review-modal-content {
+        width: 95%;
+    }
 }
 
 @media (max-width: 768px) {
@@ -1087,6 +1216,7 @@ code {
     main {
         padding: 15px;
         border-radius: 0;
+        margin: 10px;
     }
 
     section {
@@ -1143,6 +1273,14 @@ code {
         right: 10px;
         width: calc(100% - 20px);
     }
+
+    .review-filters {
+        flex-direction: column;
+    }
+
+    .filter-btn {
+        width: 100%;
+    }
 }
 
 @media (max-width: 480px) {
@@ -1175,20 +1313,27 @@ code {
     #quick-search {
         width: 100%;
     }
+
+    .returns-btn i,
+    .review-btn i {
+        font-size: 1.2em;
+    }
 }
 
 /* Print Styles */
 @media print {
-    body * {
-        visibility: hidden;
+    * {
+        margin: 0;
+        padding: 0;
     }
-    #receipt-content,
-    #receipt-content * {
-        visibility: visible;
+
+    body {
+        font-size: 12px;
+        line-height: 1.2;
     }
-    #receipt-content {
-        position: absolute;
-        left: 0;
-        top: 0;
+
+    @page {
+        size: 80mm auto;
+        margin: 0;
     }
 }
