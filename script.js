@@ -16,6 +16,7 @@ let shopSettings = {
     closeTime: '21:00',
     lowStockThreshold: 10
 };
+let returnedItems = []; // New array to store returned/replaced items for review
 
 // Owner password (change this to something secure)
 const OWNER_PASSWORD = "owner2024";
@@ -54,6 +55,17 @@ const settingsBtn = document.getElementById('settings-btn');
 const switchUserBtn = document.getElementById('switch-user-btn');
 const ownerLoginBtn = document.getElementById('owner-login-btn');
 const logoutBtn = document.getElementById('logout-btn');
+
+// Returns & Review Elements
+const returnsBtn = document.getElementById('returns-btn');
+const returnsCount = document.getElementById('returns-count');
+const reviewBtn = document.getElementById('review-btn');
+const reviewCount = document.getElementById('review-count');
+const returnsModal = document.getElementById('returns-modal');
+const closeReturnsModal = document.querySelector('.close-returns-modal');
+const reviewModal = document.getElementById('review-modal');
+const closeReviewModal = document.querySelector('.close-review-modal');
+const reviewItemsList = document.getElementById('review-items-list');
 
 // Login Modal Elements
 const loginModal = document.getElementById('login-modal');
@@ -297,11 +309,13 @@ function updateUserDisplay() {
     // Update UI based on user type
     if (isOwnerLoggedIn) {
         resetCashBtn.style.display = 'inline-block';
+        reviewBtn.style.display = 'inline-block';
         document.querySelectorAll('.owner-only').forEach(el => {
             el.style.display = 'block';
         });
     } else {
         resetCashBtn.style.display = 'none';
+        reviewBtn.style.display = 'none';
         document.querySelectorAll('.owner-only').forEach(el => {
             el.style.display = 'none';
         });
@@ -407,6 +421,19 @@ function updateStatistics() {
     const todayTotal = todaySales.reduce((sum, sale) => sum + sale.total, 0);
     todaySalesSpan.textContent = `₹${todayTotal.toFixed(2)}`;
     todayTransactionsSpan.textContent = todaySales.length;
+
+    // Update returns badge
+    updateReturnsBadges();
+}
+
+function updateReturnsBadges() {
+    // Count items pending review
+    const pendingReturns = returnedItems.filter(item => item.status === 'pending').length;
+    returnsCount.textContent = pendingReturns;
+    returnsCount.style.display = pendingReturns > 0 ? 'inline' : 'none';
+
+    reviewCount.textContent = pendingReturns;
+    reviewCount.style.display = pendingReturns > 0 ? 'inline' : 'none';
 }
 
 // =======================================================
@@ -535,6 +562,72 @@ function loadSettings() {
     }
 }
 
+function exportData() {
+    const data = {
+        products: products,
+        cashCounter: cashCounter,
+        salesHistory: salesHistory,
+        notifications: notifications,
+        returnedItems: returnedItems,
+        shopSettings: shopSettings,
+        exportDate: new Date().toISOString(),
+        exportedBy: currentUser.name
+    };
+
+    const jsonStr = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `shop_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showMessage('Data exported successfully!', 'success');
+}
+
+function importData(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const data = JSON.parse(e.target.result);
+
+            if (confirm('This will replace all current data. Continue?')) {
+                products = data.products || [];
+                cashCounter = data.cashCounter || 0;
+                salesHistory = data.salesHistory || [];
+                notifications = data.notifications || [];
+                returnedItems = data.returnedItems || [];
+                shopSettings = data.shopSettings || shopSettings;
+
+                const maxId = products.reduce((max, p) => {
+                    const idNum = parseInt(p.id.replace('prod_', ''));
+                    return idNum > max ? idNum : max;
+                }, 0);
+                nextProductId = maxId + 1;
+
+                saveProductsToLocalStorage();
+                saveSalesData();
+                saveNotifications();
+                saveReturnedItems();
+                localStorage.setItem('stationeryShopSettings', JSON.stringify(shopSettings));
+
+                displayProducts();
+                displayInventory();
+                updateCashDisplay();
+                updateNotificationDisplay();
+                updateReturnsBadges();
+
+                showMessage('Data imported successfully!', 'success');
+                loginModal.style.display = 'none';
+            }
+        } catch (error) {
+            showMessage('Invalid file format!', 'error');
+        }
+    };
+    reader.readAsText(file);
+}
+
 // =======================================================
 // 10. LOCAL STORAGE FUNCTIONS
 // =======================================================
@@ -587,13 +680,33 @@ function loadSalesData() {
     }
 }
 
+function saveReturnedItems() {
+    try {
+        localStorage.setItem('stationeryShopReturnedItems', JSON.stringify(returnedItems));
+    } catch (e) {
+        console.error('Error saving returned items:', e);
+    }
+}
+
+function loadReturnedItems() {
+    try {
+        const saved = localStorage.getItem('stationeryShopReturnedItems');
+        if (saved) {
+            returnedItems = JSON.parse(saved);
+        }
+    } catch (e) {
+        console.error('Error loading returned items:', e);
+    }
+}
+
 // Helper function to calculate boxes and singles
 function calculateStockDisplay(product) {
     if (!product.bulkQuantity || product.bulkQuantity <= 0) {
         return {
             fullBoxes: 0,
             singleUnits: product.currentStock,
-            displayText: product.currentStock === 0 ? 'Out of Stock' : `${product.currentStock} singles`
+            displayText: product.currentStock === 0 ? 'Out of Stock' :
+                product.currentStock === 1 ? '1 single' : `${product.currentStock} singles`
         };
     }
 
@@ -603,12 +716,15 @@ function calculateStockDisplay(product) {
     let displayText = '';
     if (product.currentStock === 0) {
         displayText = 'Out of Stock';
-    } else if (fullBoxes > 0 && singleUnits > 0) {
-        displayText = `${fullBoxes} box${fullBoxes > 1 ? 'es' : ''} + ${singleUnits} single${singleUnits > 1 ? 's' : ''}`;
-    } else if (fullBoxes > 0) {
-        displayText = `${fullBoxes} full box${fullBoxes > 1 ? 'es' : ''}`;
     } else {
-        displayText = `${singleUnits} single${singleUnits > 1 ? 's' : ''}`;
+        const parts = [];
+        if (fullBoxes > 0) {
+            parts.push(`${fullBoxes} box${fullBoxes !== 1 ? 'es' : ''}`);
+        }
+        if (singleUnits > 0) {
+            parts.push(`${singleUnits} single${singleUnits !== 1 ? 's' : ''}`);
+        }
+        displayText = parts.join(' + ');
     }
 
     return {
@@ -643,12 +759,6 @@ function generateBarcode(productName, type) {
     const timeCode = Date.now().toString().slice(-4);
     const suffix = type === 'bulk' ? '00' : '11';
     return nameCode + timeCode + suffix;
-}
-
-// Check owner password
-function checkOwnerPassword() {
-    const password = prompt("Enter owner password:");
-    return password === OWNER_PASSWORD;
 }
 
 // Search products
@@ -1311,7 +1421,7 @@ function handleAddStock(event) {
 }
 
 // =======================================================
-// 14. POINT OF SALE (POS) LOGIC
+// 14. POINT OF SALE (POS) LOGIC - FIXED
 // =======================================================
 
 function handleAddToCart() {
@@ -1516,7 +1626,7 @@ function handleCheckout() {
 }
 
 // =======================================================
-// 15. RETURN SYSTEM FUNCTIONS
+// 15. RETURN & REPLACEMENT SYSTEM FUNCTIONS
 // =======================================================
 
 function setupReturnSystem() {
@@ -1539,12 +1649,20 @@ function setupReturnSystem() {
 
     // Replacement form submission
     document.getElementById('replacement-form').addEventListener('submit', handleReplacementSubmit);
+
+    // Review filter buttons
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            displayReviewItems(btn.dataset.filter);
+        });
+    });
 }
 
 function handleReturnSubmit(event) {
     event.preventDefault();
 
-    const billNo = document.getElementById('return-bill-no').value.trim();
     const barcode = document.getElementById('return-barcode').value.trim().toUpperCase();
     const quantity = parseInt(document.getElementById('return-quantity').value);
     const reason = document.getElementById('return-reason').value;
@@ -1563,18 +1681,31 @@ function handleReturnSubmit(event) {
         product.bulkPrice * quantity :
         product.singlePrice * quantity;
 
-    // Update stock
-    const unitsToAdd = isBulk ? quantity * product.bulkQuantity : quantity;
-    product.currentStock += unitsToAdd;
-
-    // Update cash
+    // Update cash immediately
     cashCounter -= returnAmount;
 
-    // Record the return
-    const returnRecord = {
+    // Add to returned items for review
+    const returnItem = {
         id: `return_${Date.now()}`,
-        billNo: billNo || 'N/A',
+        productId: product.id,
+        productName: product.name,
+        barcode: barcode,
+        type: isBulk ? 'bulk' : 'single',
+        quantity: quantity,
+        amount: returnAmount,
+        reason: reason,
         timestamp: new Date().toISOString(),
+        cashier: currentUser.name,
+        status: 'pending', // pending review
+        isReturn: true
+    };
+
+    returnedItems.push(returnItem);
+
+    // Record in sales history
+    const returnRecord = {
+        id: returnItem.id,
+        timestamp: returnItem.timestamp,
         items: [{
             productId: product.id,
             name: product.name,
@@ -1595,19 +1726,19 @@ function handleReturnSubmit(event) {
     showReturnMessage('success', `Return processed successfully!<br>
         Product: ${product.name}<br>
         Quantity: ${quantity} ${isBulk ? 'box(es)' : 'unit(s)'}<br>
-        Refund Amount: Rs. ${returnAmount.toFixed(2)}`);
+        Refund Amount: Rs. ${returnAmount.toFixed(2)}<br>
+        Status: Sent for review`);
 
-    addNotification(`Return processed: ${product.name} x${quantity}`, 'info');
+    addNotification(`Return processed: ${product.name} x${quantity} - Pending review`, 'info');
 
     // Reset form
     document.getElementById('return-form').reset();
 
     // Update displays
-    displayProducts();
-    displayInventory();
-    saveProductsToLocalStorage();
     saveSalesData();
+    saveReturnedItems();
     updateCashDisplay();
+    updateReturnsBadges();
 }
 
 function handleReplacementSubmit(event) {
@@ -1633,6 +1764,12 @@ function handleReplacementSubmit(event) {
     const oldIsBulk = oldBarcode === oldProduct.bulkBarcode;
     const newIsBulk = newBarcode === newProduct.bulkBarcode;
 
+    // Check if types match (single to single, bulk to bulk)
+    if (oldIsBulk !== newIsBulk) {
+        showReplacementMessage('error', 'Type mismatch! Single items can only be replaced with single items, and bulk with bulk.');
+        return;
+    }
+
     // Check new product stock
     const newUnitsNeeded = newIsBulk ? quantity * newProduct.bulkQuantity : quantity;
     if (newProduct.currentStock < newUnitsNeeded) {
@@ -1640,10 +1777,7 @@ function handleReplacementSubmit(event) {
         return;
     }
 
-    // Process replacement
-    const oldUnitsToAdd = oldIsBulk ? quantity * oldProduct.bulkQuantity : quantity;
-    oldProduct.currentStock += oldUnitsToAdd;
-
+    // Deduct new product stock
     newProduct.currentStock -= newUnitsNeeded;
 
     // Calculate price difference
@@ -1654,10 +1788,33 @@ function handleReplacementSubmit(event) {
     // Update cash if there's a price difference
     cashCounter += priceDiff;
 
-    // Record the replacement
-    const replacementRecord = {
+    // Add old product to returned items for review
+    const replacementItem = {
         id: `replace_${Date.now()}`,
+        productId: oldProduct.id,
+        productName: oldProduct.name,
+        barcode: oldBarcode,
+        type: oldIsBulk ? 'bulk' : 'single',
+        quantity: quantity,
+        replacedWith: {
+            productId: newProduct.id,
+            productName: newProduct.name,
+            barcode: newBarcode,
+            type: newIsBulk ? 'bulk' : 'single'
+        },
+        priceDifference: priceDiff,
         timestamp: new Date().toISOString(),
+        cashier: currentUser.name,
+        status: 'pending',
+        isReplacement: true
+    };
+
+    returnedItems.push(replacementItem);
+
+    // Record the replacement in sales history
+    const replacementRecord = {
+        id: replacementItem.id,
+        timestamp: replacementItem.timestamp,
         oldProduct: {
             productId: oldProduct.id,
             name: oldProduct.name,
@@ -1688,7 +1845,7 @@ function handleReplacementSubmit(event) {
     }
 
     showReplacementMessage('success', message);
-    addNotification(`Replacement processed: ${oldProduct.name} → ${newProduct.name}`, 'info');
+    addNotification(`Replacement: ${oldProduct.name} → ${newProduct.name} - Pending review`, 'info');
 
     // Reset form
     document.getElementById('replacement-form').reset();
@@ -1698,7 +1855,9 @@ function handleReplacementSubmit(event) {
     displayInventory();
     saveProductsToLocalStorage();
     saveSalesData();
+    saveReturnedItems();
     updateCashDisplay();
+    updateReturnsBadges();
 }
 
 function showReturnMessage(type, message) {
@@ -1724,7 +1883,131 @@ function showReplacementMessage(type, message) {
 }
 
 // =======================================================
-// 16. PDF EXPORT FUNCTION
+// 16. REVIEW RETURNED ITEMS FUNCTIONS
+// =======================================================
+
+function displayReviewItems(filter = 'all') {
+    reviewItemsList.innerHTML = '';
+
+    let itemsToDisplay = returnedItems.filter(item => item.status === 'pending');
+
+    if (filter === 'returns') {
+        itemsToDisplay = itemsToDisplay.filter(item => item.isReturn);
+    } else if (filter === 'replacements') {
+        itemsToDisplay = itemsToDisplay.filter(item => item.isReplacement);
+    }
+
+    if (itemsToDisplay.length === 0) {
+        reviewItemsList.innerHTML = '<div class="empty-state"><p>No items pending review.</p></div>';
+        return;
+    }
+
+    itemsToDisplay.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'review-item';
+
+        const product = products.find(p => p.id === item.productId);
+
+        if (item.isReturn) {
+            div.innerHTML = `
+                <div class="review-item-header">
+                    <strong>${item.productName}</strong>
+                    <span class="review-item-type return">RETURN</span>
+                </div>
+                <div class="review-item-details">
+                    Barcode: <code>${item.barcode}</code><br>
+                    Type: ${item.type}<br>
+                    Quantity: ${item.quantity}<br>
+                    Refund Amount: Rs. ${item.amount.toFixed(2)}<br>
+                    Reason: ${item.reason}<br>
+                    Returned by: ${item.cashier}<br>
+                    Date: ${new Date(item.timestamp).toLocaleString()}
+                </div>
+                <div class="review-item-actions">
+                    <button class="btn-success" onclick="approveReturn('${item.id}')">Accept - Add to Stock</button>
+                    <button class="btn-danger" onclick="rejectReturn('${item.id}')">Reject - Cannot Sell</button>
+                </div>
+            `;
+        } else if (item.isReplacement) {
+            div.innerHTML = `
+                <div class="review-item-header">
+                    <strong>${item.productName}</strong>
+                    <span class="review-item-type replacement">REPLACEMENT</span>
+                </div>
+                <div class="review-item-details">
+                    Old Product: ${item.productName} (${item.type})<br>
+                    Replaced with: ${item.replacedWith.productName} (${item.replacedWith.type})<br>
+                    Quantity: ${item.quantity}<br>
+                    Price Difference: Rs. ${item.priceDifference.toFixed(2)}<br>
+                    Processed by: ${item.cashier}<br>
+                    Date: ${new Date(item.timestamp).toLocaleString()}
+                </div>
+                <div class="review-item-actions">
+                    <button class="btn-success" onclick="approveReturn('${item.id}')">Accept - Add to Stock</button>
+                    <button class="btn-danger" onclick="rejectReturn('${item.id}')">Reject - Cannot Sell</button>
+                </div>
+            `;
+        }
+
+        reviewItemsList.appendChild(div);
+    });
+}
+
+function approveReturn(itemId) {
+    const item = returnedItems.find(r => r.id === itemId);
+    if (!item) return;
+
+    const product = products.find(p => p.id === item.productId);
+    if (!product) {
+        showMessage('Product not found!', 'error');
+        return;
+    }
+
+    // Calculate units to add back
+    const unitsToAdd = item.type === 'bulk' ?
+        item.quantity * product.bulkQuantity :
+        item.quantity;
+
+    // Add stock back
+    product.currentStock += unitsToAdd;
+
+    // Update item status
+    item.status = 'approved';
+    item.reviewedBy = currentUser.name;
+    item.reviewedDate = new Date().toISOString();
+
+    showMessage(`Approved! ${unitsToAdd} units of ${product.name} added back to stock.`, 'success');
+    addNotification(`Return approved: ${product.name} +${unitsToAdd} units`, 'success');
+
+    // Save and update displays
+    saveProductsToLocalStorage();
+    saveReturnedItems();
+    displayProducts();
+    displayInventory();
+    updateReturnsBadges();
+    displayReviewItems(document.querySelector('.filter-btn.active').dataset.filter);
+}
+
+function rejectReturn(itemId) {
+    const item = returnedItems.find(r => r.id === itemId);
+    if (!item) return;
+
+    // Update item status
+    item.status = 'rejected';
+    item.reviewedBy = currentUser.name;
+    item.reviewedDate = new Date().toISOString();
+
+    showMessage(`Rejected! ${item.productName} marked as defective and will not be added to stock.`, 'info');
+    addNotification(`Return rejected: ${item.productName} - Defective`, 'warning');
+
+    // Save and update displays
+    saveReturnedItems();
+    updateReturnsBadges();
+    displayReviewItems(document.querySelector('.filter-btn.active').dataset.filter);
+}
+
+// =======================================================
+// 17. PDF EXPORT FUNCTION
 // =======================================================
 
 function exportPDF() {
@@ -1755,6 +2038,7 @@ function exportPDF() {
         `Total Sales: ${salesHistory.filter(s => !s.isReturn && !s.isReplacement).length}`,
         `Total Returns: ${salesHistory.filter(s => s.isReturn).length}`,
         `Total Replacements: ${salesHistory.filter(s => s.isReplacement).length}`,
+        `Pending Reviews: ${returnedItems.filter(r => r.status === 'pending').length}`,
         `Out of Stock Items: ${products.filter(p => p.currentStock === 0).length}`,
         `Low Stock Items: ${products.filter(p => p.currentStock > 0 && p.currentStock < shopSettings.lowStockThreshold).length}`
     ];
@@ -1829,7 +2113,7 @@ function exportPDF() {
 }
 
 // =======================================================
-// 17. INVENTORY SEARCH FUNCTIONS
+// 18. INVENTORY SEARCH FUNCTIONS
 // =======================================================
 
 function setupInventorySearch() {
@@ -1902,7 +2186,7 @@ function displayFilteredInventory(filteredProducts) {
 }
 
 // =======================================================
-// 18. ADDITIONAL UTILITY FUNCTIONS
+// 19. ADDITIONAL UTILITY FUNCTIONS
 // =======================================================
 
 // Clear Cart Function
@@ -1920,8 +2204,13 @@ function clearCart() {
     }
 }
 
+// Make functions globally accessible for onclick handlers
+window.approveReturn = approveReturn;
+window.rejectReturn = rejectReturn;
+window.saveSettings = saveSettings;
+
 // =======================================================
-// 19. EVENT LISTENERS
+// 20. EVENT LISTENERS
 // =======================================================
 
 // Form submissions
@@ -1929,8 +2218,10 @@ addProductForm.addEventListener('submit', handleAddProduct);
 addStockForm.addEventListener('submit', handleAddStock);
 loginForm.addEventListener('submit', handleLogin);
 
-// POS buttons
+// POS buttons - FIXED: Removed auto-add functionality
 addToCartBtn.addEventListener('click', handleAddToCart);
+
+// Only handle Enter key for barcode input, not auto-add on paste
 barcodeInput.addEventListener('keypress', (event) => {
     if (event.key === 'Enter') {
         event.preventDefault();
@@ -1938,7 +2229,6 @@ barcodeInput.addEventListener('keypress', (event) => {
     }
 });
 
-// Allow quantity input to submit on Enter
 posQuantityInput.addEventListener('keypress', (event) => {
     if (event.key === 'Enter') {
         event.preventDefault();
@@ -1948,7 +2238,11 @@ posQuantityInput.addEventListener('keypress', (event) => {
 
 checkoutBtn.addEventListener('click', handleCheckout);
 
-// Sales history
+// Clear cart button
+const clearCartBtn = document.getElementById('clear-cart-btn');
+clearCartBtn.addEventListener('click', clearCart);
+
+// Cash tracking buttons
 viewSalesBtn.addEventListener('click', () => {
     if (salesHistoryDiv.style.display === 'none') {
         displaySalesHistory();
@@ -1960,44 +2254,80 @@ viewSalesBtn.addEventListener('click', () => {
     }
 });
 
-// Reset cash counter
 resetCashBtn.addEventListener('click', () => {
     if (!isOwnerLoggedIn) {
-        showMessage('Only owners can reset the cash counter!', 'error');
+        showMessage('Only owners can reset the cash counter.', 'error');
         return;
     }
 
-    const confirmReset = window.confirm('Are you sure you want to reset the cash counter to 0? This will also clear sales history!');
+    const confirmReset = window.confirm('Are you sure you want to reset the cash counter? This cannot be undone!');
     if (confirmReset) {
-        cashCounter = 0;
-        salesHistory = [];
-        saveSalesData();
-        updateCashDisplay();
-        showMessage('Cash counter and sales history reset!', 'info');
-        addNotification('Cash counter reset by owner', 'warning');
+        const doubleConfirm = window.confirm('This will reset all cash to Rs. 0.00. Are you absolutely sure?');
+        if (doubleConfirm) {
+            cashCounter = 0;
+            saveSalesData();
+            updateCashDisplay();
+            showMessage('Cash counter reset to Rs. 0.00', 'success');
+            addNotification('Cash counter was reset by owner', 'warning');
+        }
+    }
+});
+
+// Export PDF button
+const exportPdfBtn = document.getElementById('export-pdf-btn');
+exportPdfBtn.addEventListener('click', exportPDF);
+
+// Modal close buttons
+closeModalBtn.addEventListener('click', () => {
+    allProductsModal.style.display = 'none';
+});
+
+closeReturnsModal.addEventListener('click', () => {
+    returnsModal.style.display = 'none';
+});
+
+closeReviewModal.addEventListener('click', () => {
+    reviewModal.style.display = 'none';
+});
+
+// Click outside modal to close
+window.addEventListener('click', (event) => {
+    if (event.target === allProductsModal) {
+        allProductsModal.style.display = 'none';
+    }
+    if (event.target === loginModal) {
+        loginModal.style.display = 'none';
+    }
+    if (event.target === returnsModal) {
+        returnsModal.style.display = 'none';
+    }
+    if (event.target === reviewModal) {
+        reviewModal.style.display = 'none';
     }
 });
 
 // Header buttons
-notificationBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    notificationDropdown.style.display = notificationDropdown.style.display === 'none' ? 'block' : 'none';
+notificationBtn.addEventListener('click', () => {
+    notificationDropdown.style.display =
+        notificationDropdown.style.display === 'block' ? 'none' : 'block';
     userDropdown.style.display = 'none';
 
-    // Mark all notifications as read
+    // Mark notifications as read when dropdown is opened
     notifications.forEach(n => n.read = true);
     updateNotificationDisplay();
+    saveNotifications();
 });
 
-userBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    userDropdown.style.display = userDropdown.style.display === 'none' ? 'block' : 'none';
+clearNotificationsBtn.addEventListener('click', clearNotifications);
+
+userBtn.addEventListener('click', () => {
+    userDropdown.style.display =
+        userDropdown.style.display === 'block' ? 'none' : 'block';
     notificationDropdown.style.display = 'none';
 });
 
 settingsBtn.addEventListener('click', showSettings);
 
-// User menu buttons
 switchUserBtn.addEventListener('click', () => {
     userDropdown.style.display = 'none';
     showLoginModal('shopkeeper');
@@ -2010,124 +2340,163 @@ ownerLoginBtn.addEventListener('click', () => {
 
 logoutBtn.addEventListener('click', handleLogout);
 
-// Clear notifications
-clearNotificationsBtn.addEventListener('click', clearNotifications);
+// Returns & Review buttons
+returnsBtn.addEventListener('click', () => {
+    returnsModal.style.display = 'block';
+});
 
-// Modal close buttons
-if (closeModalBtn) {
-    closeModalBtn.addEventListener('click', () => {
-        allProductsModal.style.display = 'none';
-    });
-}
+reviewBtn.addEventListener('click', () => {
+    if (!isOwnerLoggedIn) {
+        showMessage('Only owners can review returned items.', 'error');
+        return;
+    }
+    reviewModal.style.display = 'block';
+    displayReviewItems('all');
+});
 
-if (closeLoginModal) {
-    closeLoginModal.addEventListener('click', () => {
-        loginModal.style.display = 'none';
-    });
-}
+// Login modal
+closeLoginModal.addEventListener('click', () => {
+    loginModal.style.display = 'none';
+});
+
+// Export/Import data buttons in login modal
+document.getElementById('export-data-btn').addEventListener('click', () => {
+    exportData();
+});
+
+document.getElementById('import-data-btn').addEventListener('click', () => {
+    document.getElementById('import-file-input').click();
+});
+
+document.getElementById('import-file-input').addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        importData(file);
+    }
+});
+
+// Quick search
+setupQuickSearch();
+
+// Inventory search
+setupInventorySearch();
+
+// Return system
+setupReturnSystem();
+
+// Modal search and sort
+document.getElementById('modal-search').addEventListener('input', () => {
+    showAllProducts();
+});
+
+document.getElementById('modal-sort').addEventListener('change', () => {
+    showAllProducts();
+});
 
 // Close dropdowns when clicking outside
-window.addEventListener('click', (event) => {
+document.addEventListener('click', (event) => {
     if (!notificationBtn.contains(event.target) && !notificationDropdown.contains(event.target)) {
         notificationDropdown.style.display = 'none';
     }
-
     if (!userBtn.contains(event.target) && !userDropdown.contains(event.target)) {
         userDropdown.style.display = 'none';
     }
-
-    if (event.target === allProductsModal) {
-        allProductsModal.style.display = 'none';
-    }
-
-    if (event.target === loginModal) {
-        loginModal.style.display = 'none';
-    }
 });
 
-// Keyboard shortcuts
-document.addEventListener('keydown', (event) => {
-    // Ctrl+B for barcode focus
-    if (event.ctrlKey && event.key === 'b') {
-        event.preventDefault();
-        barcodeInput.focus();
-    }
-
-    // Ctrl+S for quick search
-    if (event.ctrlKey && event.key === 's') {
-        event.preventDefault();
-        quickSearchInput.focus();
-    }
-
-    // Escape to close modals
-    if (event.key === 'Escape') {
-        allProductsModal.style.display = 'none';
-        loginModal.style.display = 'none';
-        notificationDropdown.style.display = 'none';
-        userDropdown.style.display = 'none';
-    }
-});
-
-// Modal search and sort functionality
-const modalSearch = document.getElementById('modal-search');
-const modalSort = document.getElementById('modal-sort');
-
-if (modalSearch) {
-    modalSearch.addEventListener('input', showAllProducts);
-}
-
-if (modalSort) {
-    modalSort.addEventListener('change', showAllProducts);
-}
-
-// Clear cart button
-const clearCartBtn = document.getElementById('clear-cart-btn');
-if (clearCartBtn) {
-    clearCartBtn.addEventListener('click', clearCart);
-}
-
-// Export PDF button
-const exportPdfBtn = document.getElementById('export-pdf-btn');
-if (exportPdfBtn) {
-    exportPdfBtn.addEventListener('click', exportPDF);
-}
-
 // =======================================================
-// 20. INITIALIZATION
+// 21. INITIALIZATION
 // =======================================================
 
-document.addEventListener('DOMContentLoaded', () => {
-    // Load all data from localStorage
+// Initialize the application when the page loads
+window.addEventListener('DOMContentLoaded', () => {
+    // Load data from localStorage
     loadProductsFromLocalStorage();
     loadSalesData();
+    loadSettings();
     loadNotifications();
     loadUserSession();
-    loadSettings();
+    loadReturnedItems();
 
-    // Display initial data
+    // Set up initial displays
     displayProducts();
     displayInventory();
-    displayCart();
     updateCashDisplay();
     updateNotificationDisplay();
     updateUserDisplay();
-
-    // Setup systems
-    setupReturnSystem();
-    setupInventorySearch();
-    setupQuickSearch();
+    updateReturnsBadges();
 
     // Start date/time updates
     updateDateTime();
     setInterval(updateDateTime, 1000);
 
-    // Set initial focus
+    // Focus on barcode input by default
     barcodeInput.focus();
 
-    // Show welcome notification
-    addNotification(`Welcome back, ${currentUser.name}!`, 'info');
+    // Add welcome notification if first time
+    if (products.length === 0 && notifications.length === 0) {
+        addNotification('Welcome to Stationery Shop Manager! Add your first product to get started.', 'info');
+    }
+
+    // Check for low stock on startup
+    const lowStockProducts = products.filter(p => p.currentStock > 0 && p.currentStock < shopSettings.lowStockThreshold);
+    if (lowStockProducts.length > 0) {
+        addNotification(`${lowStockProducts.length} product(s) are running low on stock!`, 'warning');
+    }
+
+    showMessage('System loaded successfully!', 'success');
 });
 
-// Make saveSettings function globally available for inline onclick
-window.saveSettings = saveSettings;
+// Handle page unload
+window.addEventListener('beforeunload', (event) => {
+    // Save all data before leaving
+    saveProductsToLocalStorage();
+    saveSalesData();
+    saveNotifications();
+    saveUserSession();
+    saveReturnedItems();
 
+    // Show warning if there are items in cart
+    if (cart.length > 0) {
+        event.preventDefault();
+        event.returnValue = 'You have items in your cart. Are you sure you want to leave?';
+    }
+});
+
+// Handle keyboard shortcuts
+document.addEventListener('keydown', (event) => {
+    // Ctrl+B or Cmd+B - Focus barcode input
+    if ((event.ctrlKey || event.metaKey) && event.key === 'b') {
+        event.preventDefault();
+        barcodeInput.focus();
+        barcodeInput.select();
+    }
+
+    // Ctrl+S or Cmd+S - Quick save (though auto-save is enabled)
+    if ((event.ctrlKey || event.metaKey) && event.key === 's') {
+        event.preventDefault();
+        saveProductsToLocalStorage();
+        saveSalesData();
+        saveReturnedItems();
+        showMessage('Data saved!', 'success');
+    }
+
+    // Esc - Close modals
+    if (event.key === 'Escape') {
+        allProductsModal.style.display = 'none';
+        loginModal.style.display = 'none';
+        returnsModal.style.display = 'none';
+        reviewModal.style.display = 'none';
+        notificationDropdown.style.display = 'none';
+        userDropdown.style.display = 'none';
+    }
+});
+
+// Auto-save every 30 seconds
+setInterval(() => {
+    saveProductsToLocalStorage();
+    saveSalesData();
+    saveNotifications();
+    saveReturnedItems();
+}, 30000);
+
+console.log('Stationery Shop Manager initialized successfully!');
